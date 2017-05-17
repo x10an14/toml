@@ -6,6 +6,7 @@ import re
 import io
 import datetime
 from os import linesep
+from contextlib import suppress
 
 __version__ = "0.9.2"
 __spec__ = "0.4.0"
@@ -162,13 +163,11 @@ def loads(s, _dict=dict):
                 raise TomlDecodeError("Found invalid character in key name: '" + item + "'. Try quoting the key name.")
         if item == "'" and openstrchar != '"':
             k = 1
-            try:
+            with suppress(IndexError):
                 while sl[i - k] == "'":
                     k += 1
                     if k == 3:
                         break
-            except IndexError:
-                pass
             if k == 3:
                 multilinestr = not multilinestr
                 openstring = multilinestr
@@ -182,7 +181,7 @@ def loads(s, _dict=dict):
             oddbackslash = False
             k = 1
             tripquote = False
-            try:
+            with suppress(IndexError):
                 while sl[i - k] == '"':
                     k += 1
                     if k == 3:
@@ -191,8 +190,6 @@ def loads(s, _dict=dict):
                 while sl[i - k] == '\\':
                     oddbackslash = not oddbackslash
                     k += 1
-            except IndexError:
-                pass
             if not oddbackslash:
                 if tripquote:
                     multilinestr = not multilinestr
@@ -206,12 +203,10 @@ def loads(s, _dict=dict):
         if item == '#' and not openstring and not keygroup and \
                 not arrayoftables:
             j = i
-            try:
+            with suppress(IndexError):
                 while sl[j] != linesep:
                     sl[j] = ' '
                     j += 1
-            except IndexError:
-                break
         if item == '[' and not openstring and not keygroup and \
                 not arrayoftables:
             if beginline:
@@ -338,10 +333,8 @@ def loads(s, _dict=dict):
                         currentlevel[group] = [_dict()]
                 currentlevel = currentlevel[group]
                 if arrayoftables:
-                    try:
+                    with suppress(KeyError):
                         currentlevel = currentlevel[-1]
-                    except KeyError:
-                        pass
         elif line[0] == "{":
             if line[-1] != "}":
                 raise TomlDecodeError("Line breaks are not allowed in inline objects")
@@ -415,11 +408,9 @@ def _load_line(line, currentlevel, _dict, multikey, multibackslash):
             pair[-1][0] != "'" and pair[-1][0] != '"' and \
             pair[-1][0] != '[' and pair[-1][0] != '{' and \
             pair[-1] != 'true' and pair[-1] != 'false':
-        try:
+        with suppress(ValueError):
             float(pair[-1])
             break
-        except ValueError:
-            pass
         if _load_date(pair[-1]) is not None:
             break
         i += 1
@@ -565,15 +556,13 @@ def _load_value(v, _dict, strictly_valid=True):
                 closed = True
             else:
                 oddbackslash = False
-                try:
+                with suppress(IndexError):
                     i = -1
                     j = tv[i]
                     while j == '\\':
                         oddbackslash = not oddbackslash
                         i -= 1
                         j = tv[i]
-                except IndexError:
-                    pass
                 if not oddbackslash:
                     if closed:
                         raise TomlDecodeError("Stuff after closed string. WTF?")
