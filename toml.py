@@ -115,6 +115,111 @@ def loads(s, _dict=dict):
     implicitgroups = []
     retval = _dict()
     currentlevel = retval
+
+    multikey = None
+    multilinestr = ""
+    multibackslash = False
+    s = _prepare_toml_string(s).split(linesep)
+    for line in s:
+        if not multilinestr or multibackslash or linesep not in multilinestr:
+            line = line.strip()
+        if line == "" and (not multikey or multibackslash):
+            continue
+        if multikey:
+            if multibackslash:
+                multilinestr += line
+            else:
+                multilinestr += line
+            multibackslash = False
+            if len(line) > 2 and line[-1] == multilinestr[0] and \
+                    line[-2] == multilinestr[0] and line[-3] == multilinestr[0]:
+                value, vtype = _load_value(multilinestr, _dict)
+                currentlevel[multikey] = value
+                multikey = None
+                multilinestr = ""
+            else:
+                k = len(multilinestr) - 1
+                while k > -1 and multilinestr[k] == '\\':
+                    multibackslash = not multibackslash
+                    k -= 1
+                if multibackslash:
+                    multilinestr = multilinestr[:-1]
+                else:
+                    multilinestr += linesep
+            continue
+        if line[0] == '[':
+            arrayoftables = False
+            if line[1] == '[':
+                arrayoftables = True
+                line = line[2:].split(']]', 1)
+            else:
+                line = line[1:].split(']', 1)
+            if line[1].strip() != "":
+                raise TomlDecodeError("Key group not on a line by itself.")
+            groups = line[0].split('.')
+            i = 0
+            while i < len(groups):
+                groups[i] = groups[i].strip()
+                if groups[i][0] == '"' or groups[i][0] == "'":
+                    groupstr = groups[i]
+                    j = i + 1
+                    while not groupstr[0] == groupstr[-1]:
+                        j += 1
+                        groupstr = '.'.join(groups[i:j])
+                    groups[i] = groupstr[1:-1]
+                    groups[i + 1:j] = []
+                else:
+                    if not _groupname_re.match(groups[i]):
+                        raise TomlDecodeError("Invalid group name '" + groups[i] + "'. Try quoting it.")
+                i += 1
+            currentlevel = retval
+            for i in _range(len(groups)):
+                group = groups[i]
+                if group == "":
+                    raise TomlDecodeError("Can't have a keygroup with an empty name")
+                try:
+                    currentlevel[group]
+                    if i == len(groups) - 1:
+                        if group in implicitgroups:
+                            implicitgroups.remove(group)
+                            if arrayoftables:
+                                raise TomlDecodeError("An implicitly defined table can't be an array")
+                        elif arrayoftables:
+                            currentlevel[group].append(_dict())
+                        else:
+                            raise TomlDecodeError("What? " + group + " already exists?" + str(currentlevel))
+                except TypeError:
+                    if i != len(groups) - 1:
+                        implicitgroups.append(group)
+                    currentlevel = currentlevel[-1]
+                    try:
+                        currentlevel[group]
+                    except KeyError:
+                        currentlevel[group] = _dict()
+                        if i == len(groups) - 1 and arrayoftables:
+                            currentlevel[group] = [_dict()]
+                except KeyError:
+                    if i != len(groups) - 1:
+                        implicitgroups.append(group)
+                    currentlevel[group] = _dict()
+                    if i == len(groups) - 1 and arrayoftables:
+                        currentlevel[group] = [_dict()]
+                currentlevel = currentlevel[group]
+                if arrayoftables:
+                    with suppress(KeyError):
+                        currentlevel = currentlevel[-1]
+        elif line[0] == "{":
+            if line[-1] != "}":
+                raise TomlDecodeError("Line breaks are not allowed in inline objects")
+            _load_inline_object(line, currentlevel, _dict, multikey, multibackslash)
+        elif "=" in line:
+            ret = _load_line(line, currentlevel, _dict, multikey, multibackslash)
+            if ret is not None:
+                multikey, multilinestr, multibackslash = ret
+    return retval
+
+
+def _prepare_toml_string(s):
     if not isinstance(s, basestring):
         raise TypeError("Expecting something like a string")
 
@@ -242,108 +347,7 @@ def loads(s, _dict=dict):
                 if sl[i] == '=':
                     raise TomlDecodeError("Found empty keyname. ")
                 keyname = 1
-    s = ''.join(sl)
-    s = s.split(linesep)
-    multikey = None
-    multilinestr = ""
-    multibackslash = False
-    for line in s:
-        if not multilinestr or multibackslash or linesep not in multilinestr:
-            line = line.strip()
-        if line == "" and (not multikey or multibackslash):
-            continue
-        if multikey:
-            if multibackslash:
-                multilinestr += line
-            else:
-                multilinestr += line
-            multibackslash = False
-            if len(line) > 2 and line[-1] == multilinestr[0] and \
-                    line[-2] == multilinestr[0] and line[-3] == multilinestr[0]:
-                value, vtype = _load_value(multilinestr, _dict)
-                currentlevel[multikey] = value
-                multikey = None
-                multilinestr = ""
-            else:
-                k = len(multilinestr) - 1
-                while k > -1 and multilinestr[k] == '\\':
-                    multibackslash = not multibackslash
-                    k -= 1
-                if multibackslash:
-                    multilinestr = multilinestr[:-1]
-                else:
-                    multilinestr += linesep
-            continue
-        if line[0] == '[':
-            arrayoftables = False
-            if line[1] == '[':
-                arrayoftables = True
-                line = line[2:].split(']]', 1)
-            else:
-                line = line[1:].split(']', 1)
-            if line[1].strip() != "":
-                raise TomlDecodeError("Key group not on a line by itself.")
-            groups = line[0].split('.')
-            i = 0
-            while i < len(groups):
-                groups[i] = groups[i].strip()
-                if groups[i][0] == '"' or groups[i][0] == "'":
-                    groupstr = groups[i]
-                    j = i + 1
-                    while not groupstr[0] == groupstr[-1]:
-                        j += 1
-                        groupstr = '.'.join(groups[i:j])
-                    groups[i] = groupstr[1:-1]
-                    groups[i + 1:j] = []
-                else:
-                    if not _groupname_re.match(groups[i]):
-                        raise TomlDecodeError("Invalid group name '" + groups[i] + "'. Try quoting it.")
-                i += 1
-            currentlevel = retval
-            for i in _range(len(groups)):
-                group = groups[i]
-                if group == "":
-                    raise TomlDecodeError("Can't have a keygroup with an empty name")
-                try:
-                    currentlevel[group]
-                    if i == len(groups) - 1:
-                        if group in implicitgroups:
-                            implicitgroups.remove(group)
-                            if arrayoftables:
-                                raise TomlDecodeError("An implicitly defined table can't be an array")
-                        elif arrayoftables:
-                            currentlevel[group].append(_dict())
-                        else:
-                            raise TomlDecodeError("What? " + group + " already exists?" + str(currentlevel))
-                except TypeError:
-                    if i != len(groups) - 1:
-                        implicitgroups.append(group)
-                    currentlevel = currentlevel[-1]
-                    try:
-                        currentlevel[group]
-                    except KeyError:
-                        currentlevel[group] = _dict()
-                        if i == len(groups) - 1 and arrayoftables:
-                            currentlevel[group] = [_dict()]
-                except KeyError:
-                    if i != len(groups) - 1:
-                        implicitgroups.append(group)
-                    currentlevel[group] = _dict()
-                    if i == len(groups) - 1 and arrayoftables:
-                        currentlevel[group] = [_dict()]
-                currentlevel = currentlevel[group]
-                if arrayoftables:
-                    with suppress(KeyError):
-                        currentlevel = currentlevel[-1]
-        elif line[0] == "{":
-            if line[-1] != "}":
-                raise TomlDecodeError("Line breaks are not allowed in inline objects")
-            _load_inline_object(line, currentlevel, _dict, multikey, multibackslash)
-        elif "=" in line:
-            ret = _load_line(line, currentlevel, _dict, multikey, multibackslash)
-            if ret is not None:
-                multikey, multilinestr, multibackslash = ret
-    return retval
+    return ''.join(sl)
 
 
 def _load_inline_object(line, currentlevel, _dict, multikey=False, multibackslash=False):
