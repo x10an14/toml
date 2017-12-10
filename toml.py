@@ -237,15 +237,14 @@ def _prepare_toml_string(s):
 
     sl = list(s)
     openarr = 0
-    openstring = False
-    openstrchar = ""
+    beginline = True
     multilinestr = False
     arrayoftables = False
-    beginline = True
-    keygroup = False
-    keyname = 0
-    for i, item in enumerate(sl):
-        if keyname:
+    keygroup, keyname = False, 0
+    openstring, openstrchar = False, ""
+    string_list_iterator = enumerate(sl)
+    for i, item in string_list_iterator:
+        if keyname != 0:
             if item == linesep:
                 raise TomlDecodeError("Key name found without value. Reached end of line.")
             if openstring:
@@ -267,13 +266,8 @@ def _prepare_toml_string(s):
             else:
                 raise TomlDecodeError("Found invalid character in key name: '" + item + "'. Try quoting the key name.")
         if item == "'" and openstrchar != '"':
-            k = 1
-            with suppress(IndexError):
-                while sl[i - k] == "'":
-                    k += 1
-                    if k == 3:
-                        break
-            if k == 3:
+            if "".join(sl[i:i + 3]) == 3 * item:
+                _advance_iterator(string_list_iterator, 2)
                 multilinestr = not multilinestr
                 openstring = multilinestr
             else:
@@ -283,15 +277,15 @@ def _prepare_toml_string(s):
             else:
                 openstrchar = ""
         if item == '"' and openstrchar != "'":
-            oddbackslash = False
-            k = 1
-            tripquote = False
             with suppress(IndexError):
+                k = 1
+                tripquote = False
                 while sl[i - k] == '"':
                     k += 1
                     if k == 3:
                         tripquote = True
                         break
+                oddbackslash = False
                 while sl[i - k] == '\\':
                     oddbackslash = not oddbackslash
                     k += 1
@@ -348,6 +342,12 @@ def _prepare_toml_string(s):
                     raise TomlDecodeError("Found empty keyname. ")
                 keyname = 1
     return ''.join(sl)
+
+
+def _advance_iterator(iterator, count):
+    from itertools import islice
+    next(islice(iterator, count, count), None)
+    return
 
 
 def _load_inline_object(line, currentlevel, _dict, multikey=False, multibackslash=False):
@@ -516,9 +516,15 @@ def _load_unicode_escapes(v, hexbytes, prefix):
 
 
 # Unescape TOML string values.
-_escapes = ['0', 'b', 'f', 'n', 'r', 't', '"']  # content after the \
-_escapedchars = ['\0', '\b', '\f', '\n', '\r', '\t', '\"']  # What it should be replaced by
-_escape_to_escapedchars = dict(zip(_escapes, _escapedchars))    # Used for substitution
+_escapes = ['0', 'b', 'f', 'n', 'r', 't', '"']  # content after the '\'
+_escape_to_escapedchars = dict(
+    # Used for substitution
+    zip(
+        _escapes,
+        # What it should be replaced by/with
+        ['\0', '\b', '\f', '\n', '\r', '\t', '\"']
+    )
+)
 
 
 def _unescape(v):
